@@ -106,6 +106,8 @@ struct RetentionPolicy {
     #[arg(long, value_name = "N")]
     keep_daily: Option<NonZero<u16>>,
     /// For the last N weeks which have one or more snapshots, keep only the most recent one for each week.
+    ///
+    /// Note: A week starts at Monday 00:00:00, following the definition of restic.
     #[arg(long, value_name = "N")]
     keep_weekly: Option<NonZero<u16>>,
     /// For the last N months which have one or more snapshots, keep only the most recent one for each month.
@@ -273,26 +275,30 @@ fn run_prune(
         }
     }
 
-    let calendar_policies = [
-        (",hourly", policy.keep_hourly, jiff::Unit::Hour),
-        (",daily", policy.keep_daily, jiff::Unit::Day),
-        (",weekly", policy.keep_weekly, jiff::Unit::Week),
-        (",yearly", policy.keep_yearly, jiff::Unit::Year),
+    type RoundFn = fn(&jiff::Zoned) -> Result<jiff::Zoned, jiff::Error>;
+    let calendar_policies: &[(_, _, RoundFn)] = &[
+        (",hourly", policy.keep_hourly, |t| {
+            t.with().minute(0).second(0).subsec_nanosecond(0).build()
+        }),
+        (",daily", policy.keep_daily, |t| t.start_of_day()),
+        (",weekly", policy.keep_weekly, |t| {
+            // Round to the next (exclusive) Monday at 00:00:00, treat it as the start of a (next) week.
+            // This is compatible with restic.
+            t.start_of_day()?
+                .nth_weekday(1, jiff::civil::Weekday::Monday)
+        }),
+        (",yearly", policy.keep_yearly, |t| {
+            t.start_of_day()?.first_of_year()
+        }),
     ];
-    for (msg, cnt, unit) in calendar_policies {
+    for (msg, cnt, round) in calendar_policies {
         let Some(cnt) = cnt else { continue };
         let mut cnt = cnt.get();
 
         let mut last = None;
         for s in &mut snaps {
-            let rounded = s
-                .time
-                .round(
-                    jiff::ZonedRound::new()
-                        .smallest(unit)
-                        .mode(jiff::RoundMode::Floor),
-                )
-                .with_context(|| format!("failed to round {} to unit {:?}", s.time, unit))?
+            let rounded = round(&s.time)
+                .with_context(|| format!("failed to round {} to unit {:?}", s.time, &msg[1..]))?
                 .timestamp();
             if last.replace(rounded) == Some(rounded) {
                 continue;
