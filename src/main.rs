@@ -65,8 +65,8 @@ enum CliCommand {
     /// Note 2: All calendar units, eg. `--keep-daily`, use local timezone.
     /// The calendar arithmetic calculates on the specified units in local
     /// timezone, that is, "1 month" before "2025-03-01" is always "2025-02-01"
-    /// regardless how many days are there in Feb 2025.
-    /// If you intend to use UTC, set the environment variable `TZ=Etc/Utc`.
+    /// regardless how many days there are in Feb 2025.
+    /// If you intend to use UTC, set the environment variable `TZ=Etc/UTC`.
     Prune {
         /// The directory containing snapshots to prune.
         ///

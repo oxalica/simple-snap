@@ -2,6 +2,11 @@
 name = "simple-snap"
 version = "0.1.0"
 edition = "2024"
+description = "Minimalist BTRFS periodic snapshot tool"
+license = "MIT"
+categories = ["command-line-utilities", "filesystem"]
+keywords = ["btrfs", "snapshot"]
+repository = "https://github.com/oxalica/simple-snap"
 
 [dependencies]
 anyhow = "1.0.98"

@@ -27,13 +27,13 @@ pub fn snap_create_v2<F: AsFd, G: AsFd, S: AsRef<OsStr>>(
     src_subvol_fd: G,
     readonly: bool,
 ) -> Result<()> {
-    // SAFETY: Zero is a valid value for `btrfs_ioctl_vol_args_v2`.
+    // SAFETY: Zero is a valid value for POD `btrfs_ioctl_vol_args_v2`.
     let mut args = unsafe { mem::zeroed::<btrfs::btrfs_ioctl_vol_args_v2>() };
     args.fd = src_subvol_fd.as_fd().as_raw_fd().into();
     if readonly {
         args.flags = btrfs::BTRFS_SUBVOL_RDONLY.into();
     }
-    // SAFETY: Zero is an initialized value for the union.
+    // SAFETY: Zero is an initialized value for the union variant `[c_char; _]``.
     copy_os_str(name.as_ref(), unsafe { &mut args.__bindgen_anon_2.name })?;
     // SAFETY: Arguments are valid according to the doc:
     // <https://btrfs.readthedocs.io/en/latest/btrfs-ioctl.html#btrfs-ioc-snap-create-v2>
@@ -47,6 +47,8 @@ pub fn snap_create_v2<F: AsFd, G: AsFd, S: AsRef<OsStr>>(
 }
 
 /// BTRFS_IOC_SUBVOL_GETFLAGS
+///
+// We do not actually use the result value, but only to check if a directory is a subvolume.
 pub fn subvol_getflags<F: AsFd>(fd: F) -> Result<u64> {
     // SAFETY: Arguments are valid according to the doc:
     // <https://btrfs.readthedocs.io/en/latest/btrfs-ioctl.html#btrfs-ioc-subvol-getflags>
@@ -60,11 +62,11 @@ pub fn subvol_getflags<F: AsFd>(fd: F) -> Result<u64> {
 
 /// BTRFS_IOC_SNAP_DESTROY_V2
 pub fn snap_destroy_v2<F: AsFd, S: AsRef<OsStr>>(parent_dir_fd: F, name: S) -> Result<()> {
-    // SAFETY: Zero is a valid value for `btrfs_ioctl_vol_args_v2`.
+    // SAFETY: Zero is a valid value for POD `btrfs_ioctl_vol_args_v2`.
     let mut args = unsafe { mem::zeroed::<btrfs::btrfs_ioctl_vol_args_v2>() };
     // Use parent-name pair to locate subvolume.
     args.flags = 0;
-    // SAFETY: Zero is an initialized value for the union.
+    // SAFETY: Zero is an initialized value for the union variant `[c_char; _]``.
     copy_os_str(name.as_ref(), unsafe { &mut args.__bindgen_anon_2.name })?;
     // SAFETY: Arguments are valid according to the doc:
     // <https://btrfs.readthedocs.io/en/latest/btrfs-ioctl.html#btrfs-ioc-snap-destroy-v2>
