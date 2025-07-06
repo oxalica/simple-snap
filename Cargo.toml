@@ -1,0 +1,11 @@
+[package]
+name = "simple-snap"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+jiff = "0.2.15"
+linux-raw-sys = { version = "0.10.0", features = ["btrfs", "ioctl"] }
+palc = "0.0.1"
+rustix = { version = "1.0.7", features = ["fs"] }
