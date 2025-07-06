@@ -170,7 +170,11 @@ fn run_snapshot(target_dir: &Path, prefix: &str, source: &Path, dry_run: bool) -
     let target_path = target_dir.join(&snap_name);
 
     if dry_run {
-        eprintln!("would create snapshot {target_path:?} for {source:?}");
+        eprintln!(
+            "would create snapshot {} for {}",
+            target_path.display(),
+            source.display()
+        );
         eprintln!("exit without action in --dry-run mode");
         return Ok(());
     }
@@ -178,7 +182,11 @@ fn run_snapshot(target_dir: &Path, prefix: &str, source: &Path, dry_run: bool) -
     ioctl::snap_create_v2(&target_dir_fd, &snap_name, subvol_fd, true)
         .context("failed to create snapshot")?;
 
-    eprintln!("created snapshot {target_path:?} for {source:?}");
+    eprintln!(
+        "created snapshot {} for {}",
+        target_path.display(),
+        source.display(),
+    );
 
     Ok(())
 }
@@ -227,8 +235,8 @@ fn run_prune(
             open_dir(&target_dir.join(file_name))
                 .and_then(|fd| { ioctl::subvol_getflags(fd) })
                 .is_ok(),
-            "{:?} is not a BTRFS subvolume",
-            target_dir.join(file_name),
+            "{} is not a BTRFS subvolume",
+            target_dir.join(file_name).display(),
         );
 
         if time.timestamp() > current_time {
@@ -334,8 +342,8 @@ fn run_prune(
     for file_name in &to_delete {
         ioctl::snap_destroy_v2(&target_dir_fd, file_name).with_context(|| {
             format!(
-                "failed to delete subvolume {:?}",
-                target_dir.join(file_name),
+                "failed to delete subvolume {}",
+                target_dir.join(file_name).display(),
             )
         })?;
     }
