@@ -181,21 +181,22 @@ fn run_snapshot(
     );
     let target_path = target_dir.join(&snap_name);
 
-    if *skip_if_unchanged
-        && let Some(latest_snap) =
+    if *skip_if_unchanged {
+        if let Some(latest_snap) =
             list_snapshots(target_dir_fd.as_fd(), prefix, now.timestamp())?.first()
-    {
-        let snap_fd = open_dir(Some(target_dir_fd.as_fd()), latest_snap.file_name.as_ref())?;
-        let snap_info = ioctl::get_subvol_info(&snap_fd)?;
-        let src_info = ioctl::get_subvol_info(&subvol_fd)?;
-        // (source UUID, source gen) == (snap parent UUID, snap gen at creation)
-        if (src_info.uuid, src_info.generation) == (snap_info.parent_uuid, snap_info.otransid) {
-            eprintln!(
-                "source {:?} is unchanged from the latest snapshot {:?}, do nothing",
-                source.display(),
-                latest_snap.file_name,
-            );
-            return Ok(());
+        {
+            let snap_fd = open_dir(Some(target_dir_fd.as_fd()), latest_snap.file_name.as_ref())?;
+            let snap_info = ioctl::get_subvol_info(&snap_fd)?;
+            let src_info = ioctl::get_subvol_info(&subvol_fd)?;
+            // (source UUID, source gen) == (snap parent UUID, snap gen at creation)
+            if (src_info.uuid, src_info.generation) == (snap_info.parent_uuid, snap_info.otransid) {
+                eprintln!(
+                    "source {:?} is unchanged from the latest snapshot {:?}, do nothing",
+                    source.display(),
+                    latest_snap.file_name,
+                );
+                return Ok(());
+            }
         }
     }
 
