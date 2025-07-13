@@ -9,6 +9,7 @@ use palc::{Args, Parser, Subcommand};
 
 mod ioctl;
 
+/// Minimalist BTRFS periodic snapshot tool
 #[derive(Debug, Parser)]
 struct Cli {
     #[command(subcommand)]
@@ -17,81 +18,87 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
-    /// Create a BTRFS snapshot for a subvolume.
-    ///
-    /// Create a snapshot under TARGET_DIR for subvolume SOURCE. The snapshot is
-    /// named as PREFIX (empty if omitted) joined with current RFC3339 timestamp
-    /// with offset of local time zone.
-    ///
-    /// This behaves like `btrfs subvolume snapshot` with sugar, but does not
-    /// depends on btrfs-progs.
-    Snapshot {
-        /// The directory to store created snapshots.
-        ///
-        /// It must exist and is not a symlink.
-        #[arg(long, short = 'd')]
-        target_dir: PathBuf,
-        /// The prefix for snapshot names.
-        ///
-        /// If omitted, an empty string is used.
-        #[arg(long, default_value_t)]
-        prefix: String,
-        /// The source subvolume to create snapshot for.
-        #[arg(long, short)]
-        source: PathBuf,
+    Snapshot(SnapshotArgs),
+    Prune(PruneArgs),
+}
 
-        /// Only create the snapshot if there is any change since the latest
-        /// snapshot, else do nothing.
-        ///
-        /// Change detection is based on the equality of subvolume generations.
-        #[arg(long)]
-        skip_if_unchanged: bool,
+/// Create a BTRFS snapshot for a subvolume.
+///
+/// Create a snapshot under TARGET_DIR for subvolume SOURCE. The snapshot is
+/// named as PREFIX (empty if omitted) joined with current RFC3339 timestamp
+/// with offset of local time zone.
+///
+/// This behaves like `btrfs subvolume snapshot` with sugar, but does not
+/// depends on btrfs-progs.
+#[derive(Debug, Args)]
+struct SnapshotArgs {
+    /// The directory to store created snapshots.
+    ///
+    /// It must exist and is not a symlink.
+    #[arg(long, short = 'd')]
+    target_dir: PathBuf,
+    /// The prefix for snapshot names.
+    ///
+    /// If omitted, an empty string is used.
+    #[arg(long, default_value_t)]
+    prefix: String,
+    /// The source subvolume to create snapshot for.
+    #[arg(long, short)]
+    source: PathBuf,
 
-        /// Print the actions that would be done without doing them.
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Prune BTRFS snapshots according to specific retention policies.
+    /// Only create the snapshot if there is any change since the latest
+    /// snapshot, else do nothing.
     ///
-    /// All directories under TARGET_DIR prefixed by PREFIX (empty if omitted)
-    /// are subjects to prune. They must be be parsable as a jiff timestamp
-    /// after stripping PREFIX. The timestamp is expected to be in RFC3339 format.
-    /// See all supported formats in:
-    /// <https://docs.rs/jiff/0.2.15/jiff/fmt/index.html#support-for-fromstr-and-display>
-    ///
-    /// One or more policies must be specified. Snapshots will be kept if they
-    /// are covered by any policy. In other words, only snapshots that are not
-    /// covered by any policy will be deleted.
-    ///
-    /// Note 1: Subvolume deletion requires sufficient permissions, and does not
-    /// involve a full transaction commit. We do not wait (`sync`) for
-    /// transaction completion before exit either.
-    /// See details in:
-    /// <https://btrfs.readthedocs.io/en/latest/btrfs-subvolume.html#subcommand>
-    ///
-    /// Note 2: All calendar units, eg. `--keep-daily`, use local timezone.
-    /// The calendar arithmetic calculates on the specified units in local
-    /// timezone, that is, "1 month" before "2025-03-01" is always "2025-02-01"
-    /// regardless how many days there are in Feb 2025.
-    /// If you intend to use UTC, set the environment variable `TZ=Etc/UTC`.
-    Prune {
-        /// The directory containing snapshots to prune.
-        ///
-        /// It must exist and is not a symlink.
-        #[arg(long, short = 'd')]
-        target_dir: PathBuf,
-        /// The prefix of snapshots to prune.
-        ///
-        /// If omitted, an empty string is used.
-        #[arg(long, default_value_t)]
-        prefix: String,
-        #[command(flatten)]
-        policy: RetentionPolicy,
+    /// Change detection is based on the equality of subvolume generations.
+    #[arg(long)]
+    skip_if_unchanged: bool,
 
-        /// Print the actions that would be done without doing them.
-        #[arg(long)]
-        dry_run: bool,
-    },
+    /// Print the actions that would be done without doing them.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+/// Prune BTRFS snapshots according to specific retention policies.
+///
+/// All directories under TARGET_DIR prefixed by PREFIX (empty if omitted)
+/// are subjects to prune. They must be be parsable as a jiff timestamp
+/// after stripping PREFIX. The timestamp is expected to be in RFC3339 format.
+/// See all supported formats in:
+/// <https://docs.rs/jiff/0.2.15/jiff/fmt/index.html#support-for-fromstr-and-display>
+///
+/// One or more policies must be specified. Snapshots will be kept if they
+/// are covered by any policy. In other words, only snapshots that are not
+/// covered by any policy will be deleted.
+///
+/// Note 1: Subvolume deletion requires sufficient permissions, and does not
+/// involve a full transaction commit. We do not wait (`sync`) for
+/// transaction completion before exit either.
+/// See details in:
+/// <https://btrfs.readthedocs.io/en/latest/btrfs-subvolume.html#subcommand>
+///
+/// Note 2: All calendar units, eg. `--keep-daily`, use local timezone.
+/// The calendar arithmetic calculates on the specified units in local
+/// timezone, that is, "1 month" before "2025-03-01" is always "2025-02-01"
+/// regardless how many days there are in Feb 2025.
+/// If you intend to use UTC, set the environment variable `TZ=Etc/UTC`.
+#[derive(Debug, Args)]
+struct PruneArgs {
+    /// The directory containing snapshots to prune.
+    ///
+    /// It must exist and is not a symlink.
+    #[arg(long, short = 'd')]
+    target_dir: PathBuf,
+    /// The prefix of snapshots to prune.
+    ///
+    /// If omitted, an empty string is used.
+    #[arg(long, default_value_t)]
+    prefix: String,
+    #[command(flatten)]
+    policy: RetentionPolicy,
+
+    /// Print the actions that would be done without doing them.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -141,28 +148,19 @@ impl RetentionPolicy {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match &cli.cmd {
-        CliCommand::Snapshot {
-            target_dir,
-            prefix,
-            source,
-            skip_if_unchanged,
-            dry_run,
-        } => run_snapshot(target_dir, prefix, source, *skip_if_unchanged, *dry_run),
-        CliCommand::Prune {
-            target_dir,
-            prefix: name,
-            policy,
-            dry_run,
-        } => run_prune(target_dir, name, policy, *dry_run),
+        CliCommand::Snapshot(args) => run_snapshot(args),
+        CliCommand::Prune(args) => run_prune(args),
     }
 }
 
 fn run_snapshot(
-    target_dir: &Path,
-    prefix: &str,
-    source: &Path,
-    skip_if_unchanged: bool,
-    dry_run: bool,
+    SnapshotArgs {
+        target_dir,
+        prefix,
+        source,
+        skip_if_unchanged,
+        dry_run,
+    }: &SnapshotArgs,
 ) -> Result<()> {
     let target_dir_fd = open_dir(None, target_dir).context("failed to open target directory")?;
     let subvol_fd = open_dir(None, source).context("failed to open subvolume directory")?;
@@ -183,7 +181,7 @@ fn run_snapshot(
     );
     let target_path = target_dir.join(&snap_name);
 
-    if skip_if_unchanged
+    if *skip_if_unchanged
         && let Some(latest_snap) =
             list_snapshots(target_dir_fd.as_fd(), prefix, now.timestamp())?.first()
     {
@@ -201,7 +199,7 @@ fn run_snapshot(
         }
     }
 
-    if dry_run {
+    if *dry_run {
         eprintln!(
             "would create snapshot {} for {}",
             target_path.display(),
@@ -224,10 +222,12 @@ fn run_snapshot(
 }
 
 fn run_prune(
-    target_dir: &Path,
-    prefix: &str,
-    policy: &RetentionPolicy,
-    dry_run: bool,
+    PruneArgs {
+        target_dir,
+        prefix,
+        policy,
+        dry_run,
+    }: &PruneArgs,
 ) -> Result<()> {
     ensure!(policy.is_valid(), "at least one policy must be provided");
     ensure!(
@@ -319,7 +319,7 @@ fn run_prune(
         to_delete.len(),
     );
 
-    if dry_run {
+    if *dry_run {
         eprintln!("exit without action in --dry-run mode");
         return Ok(());
     }
