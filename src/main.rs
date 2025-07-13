@@ -1,6 +1,6 @@
 use std::{
     num::NonZero,
-    os::fd::OwnedFd,
+    os::fd::{AsFd, BorrowedFd, OwnedFd},
     path::{Path, PathBuf},
 };
 
@@ -158,8 +158,8 @@ fn main() -> Result<()> {
 }
 
 fn run_snapshot(target_dir: &Path, prefix: &str, source: &Path, dry_run: bool) -> Result<()> {
-    let target_dir_fd = open_dir(target_dir).context("failed to open target directory")?;
-    let subvol_fd = open_dir(source).context("failed to open subvolume directory")?;
+    let target_dir_fd = open_dir(None, target_dir).context("failed to open target directory")?;
+    let subvol_fd = open_dir(None, source).context("failed to open subvolume directory")?;
 
     let now = jiff::Zoned::now();
 
@@ -193,67 +193,15 @@ fn run_snapshot(target_dir: &Path, prefix: &str, source: &Path, dry_run: bool) -
     Ok(())
 }
 
-struct SnapshotInfo {
-    file_name: String,
-    time: jiff::Zoned,
-    keep_reason: String,
-}
-
 fn run_prune(
     target_dir: &Path,
     prefix: &str,
     policy: &RetentionPolicy,
     dry_run: bool,
 ) -> Result<()> {
-    let tz_local = jiff::tz::TimeZone::system();
-    let current_time = jiff::Timestamp::now();
-    let target_dir_fd = open_dir(target_dir).context("failed to open target directory")?;
-
-    let mut snaps = Vec::new();
-    for ent in
-        rustix::fs::Dir::read_from(&target_dir_fd).context("failed to read target directory")?
-    {
-        let ent = ent.context("failed to read target directory")?;
-        let file_name = ent.file_name();
-        // NB. Raw read from `DIR *` reports "." and "..".
-        if !ent.file_type().is_dir() || [&b"."[..], b".."].contains(&file_name.to_bytes()) {
-            continue;
-        }
-        let Some(suffix) = file_name.to_bytes().strip_prefix(prefix.as_bytes()) else {
-            continue;
-        };
-
-        let time = (|| -> Result<_> {
-            Ok(str::from_utf8(suffix)?
-                .parse::<jiff::Timestamp>()?
-                .to_zoned(tz_local.clone()))
-        })()
-        .with_context(|| {
-            format!("failed to parse time from name: {file_name:?} (prefix: {prefix:?})")
-        })?;
-        let file_name = file_name.to_str().expect("checked to be UTF-8");
-
-        ensure!(
-            open_dir(&target_dir.join(file_name))
-                .and_then(|fd| { ioctl::subvol_getflags(fd) })
-                .is_ok(),
-            "{} is not a BTRFS subvolume",
-            target_dir.join(file_name).display(),
-        );
-
-        if time.timestamp() > current_time {
-            eprintln!("warning: ignore and keep {file_name:?} from the future");
-            continue;
-        }
-
-        snaps.push(SnapshotInfo {
-            file_name: file_name.to_owned(),
-            time,
-            keep_reason: String::new(),
-        });
-    }
-    // Sort in reverse-time order.
-    snaps.sort_unstable_by_key(|s| std::cmp::Reverse(s.time.timestamp()));
+    let now = jiff::Timestamp::now();
+    let target_dir_fd = open_dir(None, target_dir).context("failed to open target directory")?;
+    let mut snaps = list_snapshots(target_dir_fd.as_fd(), prefix, now)?;
 
     if snaps.is_empty() {
         eprintln!("no snapshot is found");
@@ -359,10 +307,76 @@ fn run_prune(
     Ok(())
 }
 
-fn open_dir(path: &Path) -> rustix::io::Result<OwnedFd> {
+struct SnapshotInfo {
+    file_name: String,
+    time: jiff::Zoned,
+    /// Why this snapshot should be kept. Empty means to-be-deleted.
+    /// Only used in `run_prune`.
+    keep_reason: String,
+}
+
+/// List all existing snapshots in `target_dir` has `prefix`,
+/// sorted by creation time from latest to earliest.
+fn list_snapshots(
+    target_dir_fd: BorrowedFd<'_>,
+    prefix: &str,
+    now: jiff::Timestamp,
+) -> Result<Vec<SnapshotInfo>> {
+    let mut snaps = Vec::new();
+
+    for ent in
+        rustix::fs::Dir::read_from(target_dir_fd).context("failed to read target directory")?
+    {
+        let ent = ent.context("failed to read target directory")?;
+        let file_name = ent.file_name();
+        // NB. Raw read from `DIR *` reports "." and "..".
+        if !ent.file_type().is_dir() || [&b"."[..], b".."].contains(&file_name.to_bytes()) {
+            continue;
+        }
+        let Some(suffix) = file_name.to_bytes().strip_prefix(prefix.as_bytes()) else {
+            continue;
+        };
+
+        let time = (|| -> Result<_> {
+            Ok(str::from_utf8(suffix)?
+                .parse::<jiff::Timestamp>()?
+                .to_zoned(jiff::tz::TimeZone::system()))
+        })()
+        .with_context(|| {
+            format!("failed to parse time from name: {file_name:?} (prefix: {prefix:?})")
+        })?;
+        let file_name = file_name.to_str().expect("checked to be UTF-8");
+
+        ensure!(
+            open_dir(Some(target_dir_fd), file_name.as_ref())
+                .and_then(ioctl::subvol_getflags)
+                .is_ok(),
+            "{file_name:?} is not a BTRFS subvolume",
+        );
+
+        if time.timestamp() > now {
+            eprintln!("warning: ignore and keep {file_name:?} from the future");
+            continue;
+        }
+
+        snaps.push(SnapshotInfo {
+            file_name: file_name.to_owned(),
+            time,
+            keep_reason: String::new(),
+        });
+    }
+
+    // Sort in reverse-time order.
+    snaps.sort_unstable_by_key(|s| std::cmp::Reverse(s.time.timestamp()));
+
+    Ok(snaps)
+}
+
+fn open_dir(dir: Option<BorrowedFd<'_>>, path: &Path) -> rustix::io::Result<OwnedFd> {
     use rustix::fs::{Mode, OFlags};
 
-    rustix::fs::open(
+    rustix::fs::openat(
+        dir.unwrap_or(rustix::fs::CWD),
         path,
         OFlags::DIRECTORY | OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
         Mode::empty(),
