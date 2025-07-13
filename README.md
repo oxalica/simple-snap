@@ -18,7 +18,7 @@ This tool does NOT:
 ### Create snapshots
 
 ```console
-$ simple-snap --target-dir /.snapshots --source /home/alice --prefix home-alice@
+$ simple-snap --target-dir /.snapshots --source /home/alice --prefix home-alice@ --skip-if-unchanged
 
 created snapshot "/.snapshots/home-alice@2025-07-06T00:29:43.190772445-04:00" for "/home/alice"
 ```

@@ -40,6 +40,13 @@ enum CliCommand {
         #[arg(long, short)]
         source: PathBuf,
 
+        /// Only create the snapshot if there is any change since the latest
+        /// snapshot, else do nothing.
+        ///
+        /// Change detection is based on the equality of subvolume generations.
+        #[arg(long)]
+        skip_if_unchanged: bool,
+
         /// Print the actions that would be done without doing them.
         #[arg(long)]
         dry_run: bool,
@@ -138,28 +145,33 @@ fn main() -> Result<()> {
             target_dir,
             prefix,
             source,
+            skip_if_unchanged,
             dry_run,
-        } => run_snapshot(target_dir, prefix, source, *dry_run),
+        } => run_snapshot(target_dir, prefix, source, *skip_if_unchanged, *dry_run),
         CliCommand::Prune {
             target_dir,
             prefix: name,
             policy,
             dry_run,
-        } => {
-            ensure!(policy.is_valid(), "at least one policy must be provided");
-            ensure!(
-                policy.keep_within.is_none_or(|dur| dur.is_positive()),
-                "--keep-within only accepts a positive duration",
-            );
-
-            run_prune(target_dir, name, policy, *dry_run)
-        }
+        } => run_prune(target_dir, name, policy, *dry_run),
     }
 }
 
-fn run_snapshot(target_dir: &Path, prefix: &str, source: &Path, dry_run: bool) -> Result<()> {
+fn run_snapshot(
+    target_dir: &Path,
+    prefix: &str,
+    source: &Path,
+    skip_if_unchanged: bool,
+    dry_run: bool,
+) -> Result<()> {
     let target_dir_fd = open_dir(None, target_dir).context("failed to open target directory")?;
     let subvol_fd = open_dir(None, source).context("failed to open subvolume directory")?;
+
+    ensure!(
+        ioctl::subvol_getflags(&subvol_fd).is_ok(),
+        "{} is not a BTRFS subvolume",
+        source.display()
+    );
 
     let now = jiff::Zoned::now();
 
@@ -170,6 +182,24 @@ fn run_snapshot(target_dir: &Path, prefix: &str, source: &Path, dry_run: bool) -
             .timestamp_with_offset_to_string(&now.timestamp(), now.offset())
     );
     let target_path = target_dir.join(&snap_name);
+
+    if skip_if_unchanged
+        && let Some(latest_snap) =
+            list_snapshots(target_dir_fd.as_fd(), prefix, now.timestamp())?.first()
+    {
+        let snap_fd = open_dir(Some(target_dir_fd.as_fd()), latest_snap.file_name.as_ref())?;
+        let snap_info = ioctl::get_subvol_info(&snap_fd)?;
+        let src_info = ioctl::get_subvol_info(&subvol_fd)?;
+        // (source UUID, source gen) == (snap parent UUID, snap gen at creation)
+        if (src_info.uuid, src_info.generation) == (snap_info.parent_uuid, snap_info.otransid) {
+            eprintln!(
+                "source {:?} is unchanged from the latest snapshot {:?}, do nothing",
+                source.display(),
+                latest_snap.file_name,
+            );
+            return Ok(());
+        }
+    }
 
     if dry_run {
         eprintln!(
@@ -199,6 +229,12 @@ fn run_prune(
     policy: &RetentionPolicy,
     dry_run: bool,
 ) -> Result<()> {
+    ensure!(policy.is_valid(), "at least one policy must be provided");
+    ensure!(
+        policy.keep_within.is_none_or(|dur| dur.is_positive()),
+        "--keep-within only accepts a positive duration",
+    );
+
     let now = jiff::Timestamp::now();
     let target_dir_fd = open_dir(None, target_dir).context("failed to open target directory")?;
     let mut snaps = list_snapshots(target_dir_fd.as_fd(), prefix, now)?;

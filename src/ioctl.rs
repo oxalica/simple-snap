@@ -46,6 +46,13 @@ pub fn snap_create_v2<F: AsFd, G: AsFd, S: AsRef<OsStr>>(
     Ok(())
 }
 
+/// BTRFS_IOC_GET_SUBVOL_INFO
+pub fn get_subvol_info<F: AsFd>(fd: F) -> Result<btrfs::btrfs_ioctl_get_subvol_info_args> {
+    // SAFETY: Arguments are valid according to the doc:
+    // <https://btrfs.readthedocs.io/en/latest/btrfs-ioctl.html#btrfs-ioc-get-subvol-info>
+    unsafe { ioctl(fd, <Getter<{ ioctl::BTRFS_IOC_GET_SUBVOL_INFO }, _>>::new()) }
+}
+
 /// BTRFS_IOC_SUBVOL_GETFLAGS
 ///
 // We do not actually use the result value, but only to check if a directory is a subvolume.
